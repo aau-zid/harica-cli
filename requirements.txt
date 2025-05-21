@@ -1,0 +1,8 @@
+requests
+pyotp
+pyyaml
+beautifulsoup4
+pyopenssl
+requests-toolbelt
+cryptography
+tabulate
