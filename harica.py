@@ -2,13 +2,14 @@
 #########
 ### aau cert manager script for harica 
 #
-### version: v3.8
+### version: v3.9
 #
 ### by Martin Schrott <martin.schrott@aau.at>
 #########
 
 import argparse
 import logging
+from datetime import datetime, timedelta
 import requests
 import json
 import time
@@ -916,6 +917,35 @@ def remove_certificate(cert_name, args):
         os.remove(cert_file)
         logger.info(f"Removed {cert_file}")
 
+def check_and_renew_certificates(s, email, password, otp_secret, cert_name, validator_email, validator_password, validator_otp_secret, renew_before_days):
+    cert_dir = s.my_args.path_certs
+    now = datetime.now()
+    threshold = now + timedelta(days=renew_before_days)
+
+    for root, _, files in os.walk(cert_dir):
+        for file in files:
+            if file.endswith('combined.crt'):
+                cert_path = os.path.join(root, file)
+                try:
+                    with open(cert_path, 'rb') as f:
+                        cert_data = f.read()
+                    x509 = crypto.load_certificate(crypto.FILETYPE_PEM, cert_data)
+                    not_after = datetime.strptime(x509.get_notAfter().decode('ascii'), '%Y%m%d%H%M%SZ')
+                    days_left = (not_after - now).days
+                    #get cert_name from filename:
+                    cert_name = file.removesuffix(".combined.crt")
+                    # renew cert if valid less days then specified:
+                    if not_after > now and cert_name == 'test.aau.at':
+                        logger.warning(f"Zertifikat abgelaufen: {cert_name} (seit {-days_left} Tagen)")
+                        renew_certificate(s, email, password, otp_secret, cert_name, validator_email, validator_password, validator_otp_secret)
+                    elif not_after <= threshold:
+                        logger.info(f"Zertifikat läuft bald ab: {cert_name} (in {days_left} Tagen)")
+                        renew_certificate(s, email, password, otp_secret, cert_name, validator_email, validator_password, validator_otp_secret)
+                    else:
+                        logger.debug(f"Zertifikat gültig: {cert_name} (noch {days_left} Tage)")
+                except Exception as e:
+                    logger.error(f"Fehler beim Verarbeiten von {cert_name}: {e}")
+
 def renew_certificate(s, email, password, otp_secret, cert_name, validator_email, validator_password, validator_otp_secret):
     # check if csr exists else create new csr
     if os.path.exists(f"./{s.my_args.path_certs}/{cert_name}.csr"):
@@ -1093,6 +1123,7 @@ def main():
     cmd_group.add_argument("--remove", action="store_true", help="Remove certificate files")
     cmd_group.add_argument("--deploy", action="store_true", help="Deploy certificate --cert to server--host ")
     cmd_group.add_argument("--renew", action="store_true", help="Renew certificate --cert ")
+    cmd_group.add_argument("--check-and-renew", action="store_true", help="Check and Renew certificates, that are less than --renew-before-days valid   --cert must be set to all! ")
     cmd_group.add_argument("--info", action="store_true", help="Show certificate details of --cert ")
     
     parser.add_argument("--cert", required=True, help="Certificate name, email  or id - as required for the command choosen")
@@ -1112,6 +1143,7 @@ def main():
     parser.add_argument("--validator-otp-secret", help="Validator OTP Secret for MFA", default="")
     parser.add_argument("--host", help="Host for deployment (optional, if not given, --cert will be used as host)")
     parser.add_argument('--noscripts', default=False, action='store_true', help='do not execute /etc/ssl.d scripts on destination host after deploy')
+    parser.add_argument('--renew-before-days', type=int, default=7, help='Anzahl der Tage vor Ablauf, um Zertifikate zu erneuern')
 
     args = parser.parse_args()
 
@@ -1219,6 +1251,9 @@ def main():
     if args.deploy:
         deploy(s, args.cert, args.host)
     
+    if args.check_and_renew:
+        check_and_renew_certificates(s, args.admin_email, args.password, args.otp_secret, args.cert, args.validator_email, args.validator_password, args.validator_otp_secret, args.renew_before_days)
+
     if args.renew:
         renew_certificate(s, args.admin_email, args.password, args.otp_secret, args.cert, args.validator_email, args.validator_password, args.validator_otp_secret)
     
