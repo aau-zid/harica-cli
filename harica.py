@@ -2,7 +2,7 @@
 #########
 ### aau cert manager script for harica 
 #
-### version: v3.9
+### version: v3.9.1
 #
 ### by Martin Schrott <martin.schrott@aau.at>
 #########
@@ -621,8 +621,11 @@ def request_smime_cert(s, email):
 
     # Extrahiere Given Name und Surname aus der E-Mail
     names, domain= email.split('@')
-    gn, sn = names.capitalize().split('.')
-
+    if '.' in names:
+        gn, sn = names.capitalize().split('.')
+    else:
+        gn = ""
+        sn = names.capitalize()
     # get org info
     organization = check_domain_organization(s, domain)
     orgDN = build_organization_dn(organization)
@@ -917,7 +920,7 @@ def remove_certificate(cert_name, args):
         os.remove(cert_file)
         logger.info(f"Removed {cert_file}")
 
-def check_and_renew_certificates(s, email, password, otp_secret, cert_name, validator_email, validator_password, validator_otp_secret, renew_before_days):
+def check_and_renew_certificates(s, email, password, otp_secret, cert_arg, validator_email, validator_password, validator_otp_secret, renew_before_days,host_name):
     cert_dir = s.my_args.path_certs
     now = datetime.now()
     threshold = now + timedelta(days=renew_before_days)
@@ -934,15 +937,19 @@ def check_and_renew_certificates(s, email, password, otp_secret, cert_name, vali
                     days_left = (not_after - now).days
                     #get cert_name from filename:
                     cert_name = file.removesuffix(".combined.crt")
-                    # renew cert if valid less days then specified:
-                    if not_after > now and cert_name == 'test.aau.at':
-                        logger.warning(f"Zertifikat abgelaufen: {cert_name} (seit {-days_left} Tagen)")
-                        renew_certificate(s, email, password, otp_secret, cert_name, validator_email, validator_password, validator_otp_secret)
-                    elif not_after <= threshold:
-                        logger.info(f"Zertifikat läuft bald ab: {cert_name} (in {days_left} Tagen)")
-                        renew_certificate(s, email, password, otp_secret, cert_name, validator_email, validator_password, validator_otp_secret)
-                    else:
-                        logger.debug(f"Zertifikat gültig: {cert_name} (noch {days_left} Tage)")
+                    if cert_arg == 'all' or cert_arg == cert_name:
+                        # renew cert if valid less days then specified:
+                        if not_after < now:
+                            logger.warning(f"Zertifikat abgelaufen: {cert_name} (seit {-days_left} Tagen)")
+                            renew_certificate(s, email, password, otp_secret, cert_name, validator_email, validator_password, validator_otp_secret)
+                            deploy(s, cert_name, host_name)
+                        elif not_after <= threshold:
+                            logger.info(f"Zertifikat läuft bald ab: {cert_name} (in {days_left} Tagen)")
+                            renew_certificate(s, email, password, otp_secret, cert_name, validator_email, validator_password, validator_otp_secret)
+                            deploy(s, cert_name, host_name)
+
+                        else:
+                            logger.debug(f"Zertifikat gültig: {cert_name} (noch {days_left} Tage gültig. Ablaufdatum: {not_after})")
                 except Exception as e:
                     logger.error(f"Fehler beim Verarbeiten von {cert_name}: {e}")
 
@@ -1252,7 +1259,7 @@ def main():
         deploy(s, args.cert, args.host)
     
     if args.check_and_renew:
-        check_and_renew_certificates(s, args.admin_email, args.password, args.otp_secret, args.cert, args.validator_email, args.validator_password, args.validator_otp_secret, args.renew_before_days)
+        check_and_renew_certificates(s, args.admin_email, args.password, args.otp_secret, args.cert, args.validator_email, args.validator_password, args.validator_otp_secret, args.renew_before_days,args.host)
 
     if args.renew:
         renew_certificate(s, args.admin_email, args.password, args.otp_secret, args.cert, args.validator_email, args.validator_password, args.validator_otp_secret)
